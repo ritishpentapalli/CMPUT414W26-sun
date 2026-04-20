@@ -1,0 +1,237 @@
+\documentclass[12pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{float}
+
+% Keep abstract at 12pt (same style as proposal)
+\renewenvironment{abstract}
+ {\begin{center}
+  \bfseries \abstractname\vspace{-.5em}\vspace{0pt}
+  \end{center}
+  \list{}{
+    \listparindent 0.5cm
+    \itemindent    \listparindent
+    \leftmargin    0pt
+    \rightmargin   \leftmargin
+    \parsep        0pt
+  }
+  \item\relax}
+ {\endlist}
+
+\title{\large A DEEP LEARNING-BASED POST-PROCESSOR FOR RESTORING LOW-BITRATE JPEG2000 IMAGES\\[2mm]
+\normalsize Final Project Report (Draft)}
+
+\author{
+    Jayden Lewis \\
+    \small \texttt{jilewis@ualberta.ca}
+    \and
+    Shubh Jha \\
+    \small \texttt{sjha3@ualberta.ca}
+    \and
+    Ritish Pentapalli \\
+    \small \texttt{pentapal@ualberta.ca}
+}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report presents a deep learning based post-processing pipeline for restoring ultra-low bitrate JPEG2000 images, where ringing artifacts strongly degrade edge quality and readability. We implemented and compared three restoration architectures (AR-CNN, U-Net, and ResNet variants) under paired compressed/ground-truth supervision, and analyzed restoration quality with PSNR, SSIM, and LPIPS. Our final ResNet-based dual-domain configuration was evaluated with a targeted sanity-check protocol that compares model output directly against the compressed baseline. On a 256-sample validation subset, the model achieved mean deltas of +0.1605 dB PSNR, +0.00408 SSIM, and -0.04249 LPIPS relative to baseline, with all-three-metric improvement on 73.0\% of samples. These results indicate consistent but modest restoration gains and reveal a non-trivial failure tail that motivates hard-case focused refinement.
+\end{abstract}
+
+\section*{{\large I}\small{NTRODUCTION}}
+
+Ultra-low bitrate JPEG2000 compression (approximately 0.05--0.15 bpp) preserves transmission efficiency at the cost of severe ringing near high-contrast edges. In practical settings, this artifact pattern can obscure semantic details such as text boundaries and facial contours. Classical smoothing-based denoisers reduce visible artifacts but often blur the same edge structures required for interpretation.
+
+The objective of this project is to build a learning-based post-processor that improves compressed inputs while preserving important structures. Our approach follows the project proposal by emphasizing both objective fidelity and perceptual quality, and by validating that improvements are not only visible on selected examples but statistically supported against the compressed baseline.
+
+\section*{{\large II}\small{ RELATED WORK}}
+
+Prior work on compression artifact removal is well established for JPEG and DCT-related blocking artifacts. AR-CNN showed that artifact suppression can be learned end-to-end with shallow convolutional regressors. Residual CNN families further improved optimization stability and detail recovery by learning correction maps relative to the input image. Encoder-decoder designs such as U-Net introduced multiscale context and skip-connections, which are useful for recovering local texture while retaining coarse structure.
+
+For this project, these findings guided our model choices:
+\begin{itemize}
+    \item AR-CNN as a compact convolutional baseline.
+    \item U-Net as a multiscale architecture with strong skip information flow.
+    \item ResNet-style restoration as a residual correction model aligned with artifact subtraction.
+\end{itemize}
+
+\section*{{\large III}\small{ METHODOLOGY}}
+
+\subsection*{A. Data and Pairing Pipeline}
+
+We used paired compressed and ground-truth image directories for train, validation, and test splits. Samples are matched by filename stem (e.g., \texttt{123.jp2} and \texttt{123.png}), converted to tensors, and trained with randomized crops at a fixed patch size of 256. This setup ensures direct supervised learning from compressed-to-clean mappings.
+
+\subsection*{B. Model Families}
+
+We implemented three model families in notebook pipelines:
+\begin{itemize}
+    \item \textbf{AR-CNN}: sequential convolutional predictor.
+    \item \textbf{U-Net}: encoder-bottleneck-decoder with skip-connections.
+    \item \textbf{ResNet Restoration}: residual blocks with global skip connection.
+\end{itemize}
+
+\subsection*{C. Training and Evaluation Signals}
+
+Primary optimization in baseline notebooks uses MSE reconstruction loss. For analysis and model selection, we report PSNR, SSIM, and LPIPS. In the ResNet dual-domain workflow, we additionally use a composite score for checkpoint ranking:
+\begin{equation}
+\text{Score} = \text{PSNR} + 20\cdot\text{SSIM} - 10\cdot\text{LPIPS}.
+\end{equation}
+
+\subsection*{D. Sanity-Check Protocol}
+
+To avoid misleading qualitative conclusions, we added explicit baseline-vs-model sanity checks:
+\begin{itemize}
+    \item Per-sample metric deltas: $\Delta$PSNR, $\Delta$SSIM, $\Delta$LPIPS.
+    \item Correction magnitude: mean $|\text{output} - \text{compressed}|$.
+    \item Bulk validation report with win rates and worst-case mining.
+    \item Residual-map visualizations for hard failure cases.
+\end{itemize}
+
+\section*{{\large IV}\small{ EXPERIMENTS AND RESULTS}}
+
+\subsection*{A. Bulk Validation Sanity Report (ResNet Dual-Domain Pipeline)}
+
+On 256 validation samples, the baseline-vs-model deltas were:
+
+\begin{table}[H]
+\centering
+\caption{Aggregate baseline-vs-model deltas (256 validation samples)}
+\begin{tabular}{l c}
+\toprule
+Metric & Value \\
+\midrule
+Mean $\Delta$PSNR & +0.1605 \\
+Mean $\Delta$SSIM & +0.00408 \\
+Mean $\Delta$LPIPS (lower is better) & -0.04249 \\
+Mean $|\text{output} - \text{compressed}|$ & 0.00992 \\
+\midrule
+Median $\Delta$PSNR & +0.1696 \\
+Median $\Delta$SSIM & +0.00360 \\
+Median $\Delta$LPIPS & -0.04147 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection*{B. Win-Rate Analysis}
+
+\begin{table}[H]
+\centering
+\caption{Sample-level improvement rates}
+\begin{tabular}{l c}
+\toprule
+Condition & Rate \\
+\midrule
+PSNR improved & 87.5\% \\
+SSIM improved & 75.4\% \\
+LPIPS improved & 96.9\% \\
+All three improved simultaneously & 73.0\% \\
+At least one metric regressed & 27.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+These results suggest the model is generally helpful but not uniformly robust across the full validation distribution.
+
+\subsection*{C. Hard-Failure Tail}
+
+Worst regressions by $\Delta$PSNR reached up to -1.485 dB on individual samples (e.g., \texttt{653.jp2}), with concurrent SSIM and LPIPS degradation in several cases. For the top-5 worst subset, average deltas were strongly negative:
+\begin{itemize}
+    \item Avg $\Delta$PSNR: -0.981
+    \item Avg $\Delta$SSIM: -0.0074
+    \item Avg $\Delta$LPIPS: +0.0101
+\end{itemize}
+
+This confirms a concentrated failure tail rather than random noise in estimates.
+
+\subsection*{D. Composite Delta Interpretation}
+
+Using the same score used in checkpoint ranking,
+\begin{equation}
+\Delta\text{Score} = \Delta\text{PSNR} + 20\cdot\Delta\text{SSIM} - 10\cdot\Delta\text{LPIPS},
+\end{equation}
+we obtain approximately:
+\begin{equation}
+\Delta\text{Score} \approx 0.1605 + 20(0.00408) - 10(-0.04249) \approx +0.667.
+\end{equation}
+
+Thus, the saved checkpoint produces a positive but moderate net gain over identity (compressed input), consistent with the observed visual subtlety.
+
+\subsection*{E. Cross-Model Summary (Draft Placeholder)}
+
+ARCNN, U-Net, and baseline ResNet notebooks are implemented and trained with best-checkpoint saving. Final cross-model metric values can be inserted in Table~\ref{tab:crossmodel} after unified evaluation passes are finalized.
+
+\begin{table}[H]
+\centering
+\caption{Cross-model test summary (to finalize)}
+\label{tab:crossmodel}
+\begin{tabular}{l c c c c}
+\toprule
+Model & PSNR & SSIM & LPIPS & Net vs Baseline \\
+\midrule
+AR-CNN & TBD & TBD & TBD & TBD \\
+U-Net & TBD & TBD & TBD & TBD \\
+ResNet (dual-domain pipeline) & See sanity deltas & See sanity deltas & See sanity deltas & Positive, moderate \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{{\large V}\small{ DISCUSSION}}
+
+The central project hypothesis was that restoration quality improves when edge-aware behavior is evaluated beyond pixel MSE. Our sanity-check protocol supports this direction: most samples improve, and LPIPS gains are strong across the distribution. However, the magnitude of average gains is modest and a visible regression tail remains.
+
+Practically, this indicates that:
+\begin{itemize}
+    \item The method is viable and not a null result.
+    \item Current training still underfits hard structures in a subset of images.
+    \item Further improvement should prioritize robustness, not only average score.
+\end{itemize}
+
+Promising next refinements include hard-case oversampling, lower-rate fine-tuning from best checkpoints, and explicit regularization to reduce over-correction on difficult edge patterns.
+
+\section*{{\large VI}\small{ CONCLUSION}}
+
+This project developed and evaluated deep learning post-processors for ultra-low bitrate JPEG2000 restoration. The implemented AR-CNN, U-Net, and ResNet pipelines establish a practical benchmark framework, while the dual-domain ResNet workflow demonstrates consistent average improvements over compressed inputs when evaluated with PSNR, SSIM, and LPIPS together.
+
+The most important outcome is methodological: model quality must be judged with baseline-vs-model deltas and failure-tail analysis, not only aggregate headline metrics. Under this criterion, our current best checkpoint is beneficial overall but still leaves room for hard-case robustness improvements.
+
+\section*{References}
+\begin{thebibliography}{9}
+
+\bibitem{dong2015}
+C. Dong, Y. Deng, C. C. Loy, and X. Tang,
+"Compression artifacts reduction by a deep convolutional network,"
+in \textit{Proc. ICCV}, 2015.
+
+\bibitem{he2016}
+K. He, X. Zhang, S. Ren, and J. Sun,
+"Deep residual learning for image recognition,"
+in \textit{Proc. CVPR}, 2016.
+
+\bibitem{unet2015}
+O. Ronneberger, P. Fischer, and T. Brox,
+"U-Net: Convolutional networks for biomedical image segmentation,"
+in \textit{Proc. MICCAI}, 2015.
+
+\bibitem{ssim2004}
+Z. Wang, A. C. Bovik, H. R. Sheikh, and E. P. Simoncelli,
+"Image quality assessment: From error visibility to structural similarity,"
+\textit{IEEE TIP}, 2004.
+
+\bibitem{lpips2018}
+R. Zhang, P. Isola, A. A. Efros, E. Shechtman, and O. Wang,
+"The unreasonable effectiveness of deep features as a perceptual metric,"
+in \textit{Proc. CVPR}, 2018.
+
+\bibitem{proposal2026}
+J. Lewis, S. Jha, and R. Pentapalli,
+"A Deep Learning-Based Post-Processor for Restoring Low-Bitrate JPEG2000 Images," project proposal and literature review, CMPUT 414, 2026.
+
+\end{thebibliography}
+
+\end{document}
